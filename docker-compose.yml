@@ -1,0 +1,141 @@
+version: '3.3'
+
+services:
+  # Nextcloud service
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    restart: always
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=securepassword
+      - PHP_OPCACHE_MEMORY_CONSUMPTION=256
+
+      - VIRTUAL_HOST=cloud.ai-pro.ru
+      - LETSENCRYPT_HOST=cloud.ai-pro.ru
+      - LETSENCRYPT_EMAIL=admin@ai-pro.ru
+      - VIRTUAL_PORT=80
+    volumes:
+#      - ./nextcloud/.user.ini:/var/www/html/.user.ini
+      - ./nextcloud/config:/var/www/html/config
+      - ./nextcloud/custom_apps:/var/www/html/custom_apps
+      - ./nextcloud/data:/var/www/html/data
+      - ./nextcloud/themes:/var/www/html/themes
+#      - ./nextcloud/.htaccess:/var/www/html/.htaccess
+
+    networks:
+      - nextcloud_network
+    depends_on:
+      - db
+#      - redis
+
+
+
+  # Redis service for caching
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    networks:
+      - nextcloud_network
+
+
+
+  # Collabora service
+  collabora:
+    image: collabora/code:latest
+    container_name: collabora
+    restart: always
+    environment:
+      - domain=cloud\\.ai-pro\\.ru
+      - dictionaries=en ru
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true
+      - username=admin
+      - password=12345
+      - VIRTUAL_HOST=collabora.ai-pro.ru
+      - LETSENCRYPT_HOST=collabora.ai-pro.ru
+      - LETSENCRYPT_EMAIL=admin@ai-pro.ru
+      - VIRTUAL_PORT=9980
+    cap_add:
+      - MKNOD
+      - SYS_CHROOT
+      - FOWNER
+    ports:
+      - 9980:9980
+    volumes:
+      - ./collabora:/etc/loolwsd
+    networks:
+      - nextcloud_network
+
+
+
+  # Database service
+  db:
+    image: mariadb:latest
+    container_name: nextcloud_db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=securepassword
+    volumes:
+      - ./mysql/db_data:/var/lib/mysql
+    networks:
+      - nextcloud_network
+
+
+
+  # Nginx Proxy
+  proxy:
+    image: jwilder/nginx-proxy:alpine
+    container_name: nginx_proxy
+    restart: always
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - DEFAULT_HOST=cloud.ai-pro.ru
+#      - VIRTUAL_HOST_DISABLE=true
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./nginx/certs:/etc/nginx/certs
+      - ./nginx/vhost.d:/etc/nginx/vhost.d
+      - ./nginx/html:/usr/share/nginx/html
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+
+    networks:
+      - nextcloud_network
+
+
+
+  # Let's Encrypt companion
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: letsencrypt
+    restart: always
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx_proxy
+      - DEFAULT_EMAIL=admin@ai-pro.ru
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./nginx/certs:/etc/nginx/certs:rw
+      - ./nginx/acme.sh:/etc/acme.sh        # Добавлен том для acme.sh
+      - ./nginx/html:/usr/share/nginx/html  # Добавлен том для html
+    networks:
+      - nextcloud_network
+
+
+
+volumes:
+  nextcloud_config:
+  nextcloud_custom_apps:
+  nextcloud_themes:
+  db_data:
+
+networks:
+  nextcloud_network:
+    driver: bridge
